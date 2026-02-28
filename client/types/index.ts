@@ -53,6 +53,7 @@ export interface LocationData {
  * userId is injected client-side when fetched (not stored in the document).
  */
 export interface AvailabilityBlock {
+  id?: string;       // Firestore document ID (populated on fetch)
   userId: string;    // populated from path, not stored in Firestore
   dayOfWeek: number; // 0 = Sun … 6 = Sat
   start: string;     // "14:00"

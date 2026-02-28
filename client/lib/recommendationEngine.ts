@@ -2,37 +2,50 @@ import type { AvailabilityBlock, SuggestedSlot } from "../types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** "14:30" → 870 */
+/** Convert "HH:MM" to total minutes. "14:30" → 870 */
 function toMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
   return h * 60 + m;
 }
 
-/** 870 → "14:30" */
+/** Convert total minutes back to "HH:MM". 870 → "14:30" */
 function toTimeString(minutes: number): string {
-  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  const h = String(Math.floor(minutes / 60)).padStart(2, "0");
+  const m = String(minutes % 60).padStart(2, "0");
+  return `${h}:${m}`;
 }
 
-// ─── Sweep-Line ───────────────────────────────────────────────────────────────
+/** Check whether two time blocks overlap: A.start < B.end && B.start < A.end */
+function blocksOverlap(
+  a: { start: number; end: number },
+  b: { start: number; end: number }
+): boolean {
+  return a.start < b.end && b.start < a.end;
+}
 
-type Event = { time: number; kind: "start" | "end"; userId: string };
+// ─── Overlap detection (sweep-line per day) ───────────────────────────────────
+
+interface TimeEvent {
+  time: number;
+  kind: "start" | "end";
+  userId: string;
+}
 
 /**
- * Finds all contiguous segments on a single day where ≥2 members overlap.
- * Uses a Map<userId, count> so users with multiple blocks on the same day
- * are never double-counted.
+ * Finds contiguous segments on a single day where ≥ 2 distinct members overlap.
+ * Uses a Map so a user with multiple blocks on the same day is never double-counted.
  */
 function findDayOverlaps(
   blocks: AvailabilityBlock[]
 ): Omit<SuggestedSlot, "dayOfWeek">[] {
-  const events: Event[] = [];
+  const events: TimeEvent[] = [];
 
   for (const b of blocks) {
     events.push({ time: toMinutes(b.start), kind: "start", userId: b.userId });
-    events.push({ time: toMinutes(b.end),   kind: "end",   userId: b.userId });
+    events.push({ time: toMinutes(b.end), kind: "end", userId: b.userId });
   }
 
-  // At equal times, process "end" before "start" to avoid zero-length ghosts.
+  // Process "end" before "start" at equal times to avoid zero-length ghosts
   events.sort((a, b) =>
     a.time !== b.time ? a.time - b.time : a.kind === "end" ? -1 : 1
   );
@@ -42,14 +55,14 @@ function findDayOverlaps(
   let segmentStart = -1;
 
   for (const ev of events) {
-    const count = active.size;
+    const distinctCount = active.size;
 
-    // Close the current overlap segment before updating state.
-    if (count >= 2 && ev.time > segmentStart) {
+    // Close current overlap segment before updating state
+    if (distinctCount >= 2 && ev.time > segmentStart) {
       slots.push({
         start: toTimeString(segmentStart),
-        end:   toTimeString(ev.time),
-        overlapCount: count,
+        end: toTimeString(ev.time),
+        overlapCount: distinctCount,
       });
     }
 
@@ -57,7 +70,8 @@ function findDayOverlaps(
       active.set(ev.userId, (active.get(ev.userId) ?? 0) + 1);
     } else {
       const next = (active.get(ev.userId) ?? 1) - 1;
-      next <= 0 ? active.delete(ev.userId) : active.set(ev.userId, next);
+      if (next <= 0) active.delete(ev.userId);
+      else active.set(ev.userId, next);
     }
 
     if (active.size >= 2) segmentStart = ev.time;
@@ -71,56 +85,57 @@ function findDayOverlaps(
 /**
  * Returns the top 3 suggested study slots for a group.
  *
- * Scoring:
- *   base  = overlapCount × durationMinutes
- *   bonus = +1 per member sharing location (passed in via sharingIds)
+ * Sorting priority:
+ *   1. Highest overlapCount (most members free)
+ *   2. Longest duration
+ *   3. Earliest time (dayOfWeek then start time)
  *
- * @param availabilities  All AvailabilityBlocks fetched from Firestore
- * @param groupMemberIds  Member IDs in this group
- * @param sharingIds      Members currently sharing their location (optional)
+ * @param allAvailability  Record mapping userId → their AvailabilityBlock[]
+ * @param memberIds        Member IDs in this group (used for filtering)
  */
 export function getTopSuggestedSlots(
-  availabilities: AvailabilityBlock[],
-  groupMemberIds: string[],
-  sharingIds: string[] = []
+  allAvailability: Record<string, AvailabilityBlock[]>,
+  memberIds: string[]
 ): SuggestedSlot[] {
-  const memberSet  = new Set(groupMemberIds);
-  const sharingSet = new Set(sharingIds);
+  const memberSet = new Set(memberIds);
 
-  // 1. Filter to group members only.
-  const filtered = availabilities.filter((a) => memberSet.has(a.userId));
+  // 1. Flatten to a single array, keeping only group members
+  const flat: AvailabilityBlock[] = [];
+  for (const [userId, blocks] of Object.entries(allAvailability)) {
+    if (!memberSet.has(userId)) continue;
+    for (const b of blocks) {
+      flat.push({ ...b, userId });
+    }
+  }
 
-  // 2. Group by dayOfWeek.
+  // 2. Group blocks by dayOfWeek
   const byDay = new Map<number, AvailabilityBlock[]>();
-  for (const block of filtered) {
+  for (const block of flat) {
     if (!byDay.has(block.dayOfWeek)) byDay.set(block.dayOfWeek, []);
     byDay.get(block.dayOfWeek)!.push(block);
   }
 
-  // 3. Find overlapping segments per day and score them.
-  const candidates: (SuggestedSlot & { score: number })[] = [];
+  // 3. Find overlap segments per day
+  const candidates: SuggestedSlot[] = [];
 
   for (const [dayOfWeek, blocks] of byDay) {
     for (const slot of findDayOverlaps(blocks)) {
-      const duration    = toMinutes(slot.end) - toMinutes(slot.start);
-      const activeUsers = blocks
-        .filter(
-          (b) =>
-            toMinutes(b.start) <= toMinutes(slot.start) &&
-            toMinutes(b.end)   >= toMinutes(slot.end)
-        )
-        .map((b) => b.userId);
-
-      const locationBonus = activeUsers.filter((id) => sharingSet.has(id)).length;
-      const score = slot.overlapCount * duration + locationBonus;
-
-      candidates.push({ dayOfWeek, ...slot, score });
+      candidates.push({ dayOfWeek, ...slot });
     }
   }
 
-  // 4. Sort by score, return top 3.
-  return candidates
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3)
-    .map(({ score: _score, ...rest }) => rest);
+  // 4. Sort: overlapCount desc → duration desc → dayOfWeek asc → start asc
+  candidates.sort((a, b) => {
+    if (b.overlapCount !== a.overlapCount) return b.overlapCount - a.overlapCount;
+
+    const durA = toMinutes(a.end) - toMinutes(a.start);
+    const durB = toMinutes(b.end) - toMinutes(b.start);
+    if (durB !== durA) return durB - durA;
+
+    if (a.dayOfWeek !== b.dayOfWeek) return a.dayOfWeek - b.dayOfWeek;
+    return toMinutes(a.start) - toMinutes(b.start);
+  });
+
+  // 5. Return top 3
+  return candidates.slice(0, 3);
 }

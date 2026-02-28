@@ -4,6 +4,7 @@
 // Responsibilities: group chat, member list, session proposals.
 
 import { use } from "react";
+import AvailabilityPanel from "./availability";
 
 export default function GroupPage({
   params,
@@ -16,6 +17,9 @@ export default function GroupPage({
     <div>
       <h1 className="text-xl font-semibold mb-4">Group</h1>
       <p className="text-sm text-zinc-400">groupId: {groupId}</p>
+
+      {/* Dev 3 — Availability & Suggestions */}
+      <AvailabilityPanel groupId={groupId} />
     </div>
   );
 }

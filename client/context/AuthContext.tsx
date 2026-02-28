@@ -25,31 +25,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      // No user yet — trigger anonymous sign-in; listener will re-fire.
-      if (!firebaseUser) {
-        await signInAnonymously(auth);
-        return;
+      try {
+        // No user yet — trigger anonymous sign-in; listener will re-fire.
+        if (!firebaseUser) {
+          await signInAnonymously(auth);
+          return;
+        }
+
+        setUser(firebaseUser);
+
+        // Create users/{userId} on first sign-in if it doesn't exist.
+        const userRef  = doc(db, "users", firebaseUser.uid);
+        const userSnap = await getDoc(userRef);
+
+        if (!userSnap.exists()) {
+          const newProfile: Omit<UserProfile, "createdAt"> = {
+            name: "Anonymous",
+            shareLocation: false,
+          };
+          await setDoc(userRef, { ...newProfile, createdAt: serverTimestamp() });
+          setProfile(newProfile);
+        } else {
+          const data = userSnap.data();
+          setProfile({ name: data.name, shareLocation: data.shareLocation });
+        }
+      } catch (err) {
+        console.error("Auth/Firestore error:", err);
+        // Fall through so the UI still renders
+      } finally {
+        setLoading(false);
       }
-
-      setUser(firebaseUser);
-
-      // Create users/{userId} on first sign-in if it doesn't exist.
-      const userRef  = doc(db, "users", firebaseUser.uid);
-      const userSnap = await getDoc(userRef);
-
-      if (!userSnap.exists()) {
-        const newProfile: Omit<UserProfile, "createdAt"> = {
-          name: "Anonymous",
-          shareLocation: false,
-        };
-        await setDoc(userRef, { ...newProfile, createdAt: serverTimestamp() });
-        setProfile(newProfile);
-      } else {
-        const data = userSnap.data();
-        setProfile({ name: data.name, shareLocation: data.shareLocation });
-      }
-
-      setLoading(false);
     });
 
     return unsubscribe;
