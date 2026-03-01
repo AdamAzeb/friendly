@@ -2,9 +2,26 @@ import type { Timestamp } from "firebase/firestore";
 
 // ─── User ─────────────────────────────────────────────────────────────────────
 
+export type StudyStatus =
+  | "locked_in"   // Studying hard, don't disturb
+  | "come_study"  // Come study with me!
+  | "free"        // Free time, come join
+  | "eating"      // Going to eat
+  | "invisible";  // Hidden from map
+
 export interface UserProfile {
   name: string;
+  university: string;
+  degree: string;
+  year: string;
+  interests: string[];
   shareLocation: boolean;
+  status: StudyStatus;
+  avatarUrl?: string;
+  lat?: number;
+  lng?: number;
+  locationUpdatedAt?: Timestamp;
+  groupIds?: string[];
   createdAt?: Timestamp;
 }
 
@@ -18,11 +35,18 @@ export interface Group {
   createdAt?: Timestamp;
 }
 
+export interface GroupMember {
+  uid: string;
+  name: string;
+  joinedAt?: Timestamp;
+}
+
 // ─── Chat ─────────────────────────────────────────────────────────────────────
 
 export interface Message {
   id: string;
   senderId: string;
+  senderName: string;
   text: string;
   timestamp: Timestamp;
 }
@@ -36,6 +60,7 @@ export interface Session {
   end: string;       // "16:00"
   proposedBy: string;
   rsvps: string[];   // userIds
+  createdAt?: Timestamp;
 }
 
 // ─── Location ─────────────────────────────────────────────────────────────────
@@ -66,4 +91,28 @@ export interface SuggestedSlot {
   start: string;
   end: string;
   overlapCount: number;
+}
+
+// ─── Friends & DMs ────────────────────────────────────────────────────────────
+
+export interface FriendRequest {
+  id: string;
+  from: string;
+  fromName: string;
+  to: string;
+  toName: string;
+  status: "pending" | "accepted" | "declined";
+  createdAt?: Timestamp;
+}
+
+// ─── Map ──────────────────────────────────────────────────────────────────────
+
+export interface MapUser {
+  uid: string;
+  name: string;
+  lat: number;
+  lng: number;
+  status: StudyStatus;
+  avatarUrl?: string;
+  isPlaceholder?: boolean;
 }
