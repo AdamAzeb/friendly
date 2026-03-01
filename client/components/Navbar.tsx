@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import Image from "next/image";
 import { useAuth } from "../context/AuthContext";
 import { Users, Map, User, UserPlus } from "lucide-react";
 import { avatarColor, isValidImageUrl } from "../lib/avatarColor";
@@ -28,9 +29,13 @@ export default function Navbar() {
 
         {/* Logo */}
         <Link href="/dashboard" className="flex items-center gap-2 shrink-0">
-          <div className="w-7 h-7 rounded-lg bg-[#3B82F6] flex items-center justify-center shadow-[0_0_12px_rgba(59,130,246,0.4)]">
-            <span className="text-white text-xs font-bold">F</span>
-          </div>
+          <Image
+            src="/logo.png"
+            alt="Friendly"
+            width={32}
+            height={32}
+            className="rounded-lg"
+          />
           <span
             className="text-white tracking-wider hidden sm:inline"
             style={{ fontFamily: "var(--font-bebas)", fontSize: "22px", letterSpacing: "0.08em" }}
